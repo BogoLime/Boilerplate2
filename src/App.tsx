@@ -9,9 +9,20 @@ import Wrapper from './components/Wrapper';
 import Header from './components/Header';
 import Loader from './components/Loader';
 import ConnectButton from './components/ConnectButton';
+import SubmitForm from './components/SubmitForm';
+import TransactionLink from './components/TransctionLink';
+import Button from './components/Button';
 
 import { Web3Provider } from '@ethersproject/providers';
 import { getChainData } from './helpers/utilities';
+
+import {
+  US_ELECTION_ADDRESS
+} from './constants/contracts';
+import { getContract } from './helpers/ethers';
+
+import ABI from "./constants/abis/USElection.json";
+import StatSection from './components/Stats';
 
 const SLayout = styled.div`
   position: relative;
@@ -48,6 +59,13 @@ const SBalances = styled(SLanding)`
   }
 `;
 
+interface IStats{
+  leader: string;
+  biden: number;
+  trump: number;
+  isEnded: boolean;
+}
+
 interface IAppState {
   fetching: boolean;
   address: string;
@@ -58,6 +76,10 @@ interface IAppState {
   result: any | null;
   electionContract: any | null;
   info: any | null;
+  contract: any | null;
+  stats:IStats;
+  transactionHash: string | null;
+  failMsg: string | null
 }
 
 const INITIAL_STATE: IAppState = {
@@ -69,7 +91,16 @@ const INITIAL_STATE: IAppState = {
   pendingRequest: false,
   result: null,
   electionContract: null,
-  info: null
+  info: null,
+  contract: null,
+  stats: {
+    leader:"",
+    biden: 0,
+    trump: 0,
+    isEnded: false
+  },
+  transactionHash:null,
+  failMsg:null
 };
 
 class App extends React.Component<any, any> {
@@ -93,8 +124,17 @@ class App extends React.Component<any, any> {
 
   public componentDidMount() {
     if (this.web3Modal.cachedProvider) {
-      this.onConnect();
+      this.setState({fetching:true})
+      this.onConnect()
+      .then(() =>{
+      this.updateStats()})
+      .then(()=>{
+      this.setState({fetching:false})
+    })
+
     }
+
+    
   }
 
   public onConnect = async () => {
@@ -106,11 +146,14 @@ class App extends React.Component<any, any> {
 
     const address = this.provider.selectedAddress ? this.provider.selectedAddress : this.provider.accounts[0];
 
+    const contract  = getContract(US_ELECTION_ADDRESS,ABI.abi,library,address)
+
     await this.setState({
       library,
       chainId: network.chainId,
       address,
-      connected: true
+      connected: true,
+      contract,
     });
 
     await this.subscribeToProviderEvents(this.provider);
@@ -175,6 +218,51 @@ class App extends React.Component<any, any> {
     return providerOptions;
   };
 
+  public updateStats = async() => {
+    const {contract} = this.state
+    const leader = await contract.currentLeader()
+    const biden = await contract.seats(1)
+    const trump = await contract.seats(2)
+    const isEnded = await contract.electionEnded()
+
+    await this.setState({stats:{leader, biden, trump, isEnded}})
+
+  }
+
+  public _executeTransaction = async (transaction:any) =>{
+    this.setState({fetching:true})
+    this.setState({ transactionHash: transaction.hash })
+
+    const receipt = await transaction.wait()
+    if (receipt.status !== 1) {
+      this.setState({failMsg:"The transaction failed"})
+      setTimeout(()=>{
+        this.setState({failMsg:null})
+      }, 2000)
+    }
+    await this.updateStats()
+
+    this.setState({fetching:false})
+    this.setState({ transactionHash: null})
+  }
+
+  public submitVote =  async(state:string,vBiden:number,vTrump:number,seatsNum:number) => {
+
+    const transaction = await this.state.contract.submitStateResult([state,vBiden,vTrump,seatsNum])
+    
+    this._executeTransaction(transaction)
+
+  }
+
+  public endElection  = async() =>{
+    const {contract} = this.state
+    
+    const transaction = await contract.endElection()
+
+    this._executeTransaction(transaction)
+
+  }
+
   public resetApp = async () => {
     await this.web3Modal.clearCachedProvider();
     localStorage.removeItem("WEB3_CONNECT_CACHED_PROVIDER");
@@ -190,7 +278,10 @@ class App extends React.Component<any, any> {
       address,
       connected,
       chainId,
-      fetching
+      fetching,
+      stats,
+      transactionHash,
+      failMsg
     } = this.state;
     return (
       <SLayout>
@@ -206,11 +297,16 @@ class App extends React.Component<any, any> {
               <Column center>
                 <SContainer>
                   <Loader />
+                  {transactionHash && <TransactionLink hash={transactionHash} />}
                 </SContainer>
               </Column>
             ) : (
                 <SLanding center>
+                  {failMsg!== null && <p>{failMsg}</p>}
                   {!this.state.connected && <ConnectButton onClick={this.onConnect} />}
+                  {this.state.connected && <SubmitForm  onClick = {this.submitVote}/>}
+                  {this.state.connected && <Button color ={"red"} onClick={this.endElection}> End Election </ Button> }
+                  {this.state.connected && <StatSection  stats={stats}/>}
                 </SLanding>
               )}
           </SContent>

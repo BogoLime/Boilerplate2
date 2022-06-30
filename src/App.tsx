@@ -122,6 +122,7 @@ class App extends React.Component<any, any> {
     });
   }
 
+  // Load data on initial component load
   public componentDidMount() {
     if (this.web3Modal.cachedProvider) {
       this.setState({fetching:true})
@@ -218,6 +219,7 @@ class App extends React.Component<any, any> {
     return providerOptions;
   };
 
+  // Gets the info abput the current election status
   public updateStats = async() => {
     const {contract} = this.state
     const leader = await contract.currentLeader()
@@ -229,6 +231,7 @@ class App extends React.Component<any, any> {
 
   }
 
+  // Preventing code duplication
   public _executeTransaction = async (transaction:any) =>{
     this.setState({fetching:true})
     this.setState({ transactionHash: transaction.hash })
